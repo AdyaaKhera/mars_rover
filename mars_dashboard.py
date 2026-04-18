@@ -52,7 +52,7 @@ GAMEPAD_AXIS_DEADZONE = 0.45
 GAMEPAD_TRIGGER_ACTIVE_THRESHOLD = -0.70
 UI_REFRESH_MS = 90
 VAL_LOG_INTERVAL_MS = 1200
-MOTION_TX_INTERVAL_MS = 100
+MOTION_TX_INTERVAL_MS = 60
 PKT_PROCESS_MIN_MS = 55
 VAL_PROCESS_MIN_MS = 75
 CAMERA_RENDER_MIN_MS = 60
@@ -1326,9 +1326,28 @@ class MarsDashboard:
             self.boot_overlay = None
 
     def refresh_ports(self):
-        ports = [p.device for p in serial.tools.list_ports.comports()]
+        all_ports = [p.device for p in serial.tools.list_ports.comports()]
+        preferred = [
+            p for p in all_ports
+            if ("usbmodem" in p.lower() or "usbserial" in p.lower() or "wchusbserial" in p.lower())
+        ]
+        if preferred:
+            ports = preferred
+        else:
+            # Keep legacy ports visible, but de-prioritize obvious non-rover endpoints.
+            ports = [
+                p for p in all_ports
+                if ("bluetooth" not in p.lower() and "debug" not in p.lower() and "wlan" not in p.lower())
+            ]
+            if not ports:
+                ports = all_ports
+
         self.port_combo["values"] = ports
-        if ports and not self.port_var.get():
+
+        current = self.port_var.get().strip()
+        if ports and current not in ports:
+            self.port_var.set(ports[0])
+        elif ports and not current:
             self.port_var.set(ports[0])
 
     def refresh_sources(self):
@@ -1344,6 +1363,9 @@ class MarsDashboard:
     def connect(self):
         port = self.port_var.get().strip()
         if not port:
+            self.refresh_ports()
+            port = self.port_var.get().strip()
+        if not port:
             self.status_var.set("No port selected")
             return
 
@@ -1358,15 +1380,26 @@ class MarsDashboard:
         except serial.SerialException as e:
             msg = str(e)
             low = msg.lower()
+            # On macOS, /dev/cu.* can be busy while /dev/tty.* is still usable.
+            if "resource busy" in low and "/dev/cu." in port:
+                alt_port = port.replace("/dev/cu.", "/dev/tty.")
+                try:
+                    self.serial_conn = serial.Serial(alt_port, baud, timeout=0.3)
+                    port = alt_port
+                except Exception:
+                    self.serial_conn = None
             if "resource busy" in low or "permission" in low or "access is denied" in low:
-                self.status_var.set("Port busy: close Serial Monitor/Plotter, then retry")
-                self.append_log(f"PORT_BUSY {port}: {msg}")
+                if not self.serial_conn:
+                    self.status_var.set("Port busy: close Serial Monitor/Plotter, then retry")
+                    self.append_log(f"PORT_BUSY {port}: {msg}")
             else:
-                self.status_var.set(f"Connect failed: {msg}")
-                self.append_log(f"CONNECT_ERR {port}: {msg}")
-            self.serial_conn = None
-            self.refresh_ports()
-            return
+                if not self.serial_conn:
+                    self.status_var.set(f"Connect failed: {msg}")
+                    self.append_log(f"CONNECT_ERR {port}: {msg}")
+            if not self.serial_conn:
+                self.serial_conn = None
+                self.refresh_ports()
+                return
         except Exception as e:
             self.status_var.set(f"Connect failed: {e}")
             self.append_log(f"CONNECT_ERR {port}: {e}")

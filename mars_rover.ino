@@ -144,8 +144,8 @@ float HOT_TEMP_TH = 35.0;
 const unsigned long CAL_TIME_MS = 5000;
 
 // Telemetry timing
-const unsigned long LOOP_MS = 80;
-const unsigned long COMMAND_PUMP_MS = 2;
+const unsigned long LOOP_MS = 50;
+const unsigned long COMMAND_PUMP_MS = 1;
 const unsigned long SUMMARY_MS = 30000;
 
 // Distance smoothing
@@ -943,6 +943,10 @@ void loop() {
 	#if USE_BAROMETER
 	updateBarometer();
 	#endif
+
+	// Pull any late-arriving serial packets into the current cycle before
+	// deciding motor safety and LCD state.
+	serviceSerialCommands();
 
 	updateCriticalAlert(distCm);
 	updateSector();
