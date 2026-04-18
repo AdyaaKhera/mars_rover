@@ -48,6 +48,8 @@ RADAR_PING_CRIT = "#ff4d4d"
 TARGET_MIN_AREA_RATIO = 0.015
 MOTION_ALERT_THRESHOLD = 50.0
 EDGE_OBSTACLE_THRESHOLD = 0.095
+GAMEPAD_AXIS_DEADZONE = 0.45
+GAMEPAD_TRIGGER_ACTIVE_THRESHOLD = -0.70
 UI_REFRESH_MS = 140
 VAL_LOG_INTERVAL_MS = 1200
 MOTION_TX_INTERVAL_MS = 150
@@ -595,6 +597,14 @@ class MarsDashboard:
         self.gamepad_name = ""
         self.gamepad_last_cmd = None
         self.gamepad_last_speed = None
+
+        global pygame
+        if pygame is not None:
+            try:
+                pygame.joystick.quit()
+            except Exception:
+                pass
+
         self.append_log("Gamepad control disabled.")
 
     def scan_gamepad(self, force_log=False):
@@ -677,11 +687,14 @@ class MarsDashboard:
 
             axis_x = self.gamepad.get_axis(0) if self.gamepad.get_numaxes() > 0 else 0.0
             axis_y = self.gamepad.get_axis(1) if self.gamepad.get_numaxes() > 1 else 0.0
-            deadzone = 0.35
+            deadzone = GAMEPAD_AXIS_DEADZONE
 
-            # Optional speed by trigger axis (common on many USB pads).
-            trigger_axis = self.gamepad.get_axis(5) if self.gamepad.get_numaxes() > 5 else -1.0
-            speed_level = int(max(0, min(10, round(((trigger_axis + 1.0) / 2.0) * 10.0))))
+            # Optional speed by trigger axis. If trigger is idle, keep current UI speed.
+            speed_level = int(self.motor_speed_var.get())
+            if self.gamepad.get_numaxes() > 5:
+                trigger_axis = self.gamepad.get_axis(5)
+                if trigger_axis > GAMEPAD_TRIGGER_ACTIVE_THRESHOLD:
+                    speed_level = int(max(0, min(10, round(((trigger_axis + 1.0) / 2.0) * 10.0))))
 
             desired = 'S'
             if hat_y > 0:
@@ -692,13 +705,13 @@ class MarsDashboard:
                 desired = 'L'
             elif hat_x > 0:
                 desired = 'R'
-            elif axis_y < -deadzone:
+            elif abs(axis_y) >= abs(axis_x) and axis_y < -deadzone:
                 desired = 'F'
-            elif axis_y > deadzone:
+            elif abs(axis_y) >= abs(axis_x) and axis_y > deadzone:
                 desired = 'B'
-            elif axis_x < -deadzone:
+            elif abs(axis_x) > abs(axis_y) and axis_x < -deadzone:
                 desired = 'L'
-            elif axis_x > deadzone:
+            elif abs(axis_x) > abs(axis_y) and axis_x > deadzone:
                 desired = 'R'
 
             # Any face button forces stop.

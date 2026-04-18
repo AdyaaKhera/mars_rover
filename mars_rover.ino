@@ -22,6 +22,8 @@
 #if USE_LCD
 #include <rgb_lcd.h>
 rgb_lcd lcd;
+bool lcdReady = false;
+unsigned long lastLcdInitTryMs = 0;
 #endif
 
 #if USE_BAROMETER
@@ -764,7 +766,32 @@ void printSummary(unsigned long ms) {
 }
 
 #if USE_LCD
+bool initLcd() {
+	// Retry init a few times because I2C peripherals may power up slowly.
+	for (uint8_t attempt = 0; attempt < 3; attempt++) {
+		lcd.begin(16, 2);
+		lcd.setRGB(0, 255, 255);
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		lcd.print("MARS ROVER V4");
+		lcd.setCursor(0, 1);
+		lcd.print("Booting...");
+		delay(20);
+	}
+
+	lcdReady = true;
+	lastLcdInitTryMs = millis();
+	return lcdReady;
+}
+
 void updateLcd(float distCm, float tempC, uint8_t s) {
+	if (!lcdReady) {
+		if (millis() - lastLcdInitTryMs > 2000) {
+			initLcd();
+		}
+		if (!lcdReady) return;
+	}
+
 	char col = 'A' + sectorX;
 	int row = sectorY + 1;
 
@@ -850,8 +877,11 @@ void setup() {
 	analogReadResolution(10);
 	#endif
 
-	#if USE_BAROMETER
+	#if USE_LCD || USE_BAROMETER
 	Wire.begin();
+	#endif
+
+	#if USE_BAROMETER
 	#if BAROMETER_ORNAMENTAL
 	baroOk = true;
 	baroAddr = 0;
@@ -868,12 +898,7 @@ void setup() {
 	#endif
 
 #if USE_LCD
-	lcd.begin(16, 2);
-	lcd.setRGB(0, 255, 255);
-	lcd.setCursor(0, 0);
-	lcd.print("MARS ROVER V4");
-	lcd.setCursor(0, 1);
-	lcd.print("Booting...");
+	initLcd();
 #endif
 
 	bootStart = millis();
