@@ -144,8 +144,8 @@ float HOT_TEMP_TH = 35.0;
 const unsigned long CAL_TIME_MS = 5000;
 
 // Telemetry timing
-const unsigned long LOOP_MS = 120;
-const unsigned long COMMAND_PUMP_MS = 5;
+const unsigned long LOOP_MS = 80;
+const unsigned long COMMAND_PUMP_MS = 2;
 const unsigned long SUMMARY_MS = 30000;
 
 // Distance smoothing
@@ -336,8 +336,9 @@ const char* driveName(uint8_t m) {
 }
 
 uint8_t decideState(float distCm, int lightRaw, int moistRaw, float tempC) {
-	if (motionScore > 50.0) return HAZARD;  // Motion hazard takes priority
+	// Distance hazard is highest priority for safety.
 	if (distCm > 0 && distCm < HAZARD_DIST_CM) return HAZARD;
+	if (motionScore > 50.0) return HAZARD;
 	if (moistRaw > SAMPLE_MOIST_TH || tempC > HOT_TEMP_TH) return SAMPLE_CANDIDATE;
 	if (lightRaw < DARK_LIGHT_TH) return DARK_ZONE;
 	return SCAN;
@@ -614,8 +615,23 @@ void parseMotionScore(const String &line) {
 	
 	String scoreStr = line.substring(scorePos, pipePos);
 	motionScore = scoreStr.toFloat();
-	
-	bool newMotionHazard = motionScore > 50.0;
+
+	// Optional explicit state from dashboard for hazard transitions.
+	bool explicitStateFound = false;
+	bool explicitHazardState = false;
+	int statePos = line.indexOf("state=");
+	if (statePos >= 0) {
+		explicitStateFound = true;
+		statePos += 6; // Skip "state="
+		int stateEnd = line.indexOf('|', statePos);
+		if (stateEnd < 0) stateEnd = line.length();
+		String stateStr = line.substring(statePos, stateEnd);
+		stateStr.trim();
+		stateStr.toUpperCase();
+		explicitHazardState = (stateStr == "HAZARD");
+	}
+
+	bool newMotionHazard = explicitStateFound ? explicitHazardState : (motionScore > 50.0);
 	if (newMotionHazard && !motionHazardActive) {
 		motionHazardActive = true;
 		Serial.print("MARS_ALERT|ms=");
@@ -631,14 +647,18 @@ void parseMotionScore(const String &line) {
 	}
 }
 void updateMotionSafety(float distCm) {
-	hazardStopActive = (distCm > 0 && distCm < HAZARD_DIST_CM);
+	bool distanceHazardNow = (distCm > 0 && distCm < HAZARD_DIST_CM);
+	hazardStopActive = distanceHazardNow;
 
-	if (hazardStopActive) {
+	if (distanceHazardNow) {
+		// Hard safety override: hazardous distance always stops the rover.
 		effectiveCmd = 'S';
-	} else {
-		effectiveCmd = requestedCmd;
+		requestedCmd = 'S';
+		applyDriveCommand('S');
+		return;
 	}
 
+	effectiveCmd = requestedCmd;
 	applyDriveCommand(effectiveCmd);
 }
 
@@ -813,7 +833,8 @@ void updateLcd(float distCm, float tempC, uint8_t s) {
 	else lcd.print(tempC, 0);
 	lcd.print("   ");
 
-	bool hazardNow = (s == HAZARD) || hazardStopActive || motionHazardActive || (distCm > 0 && distCm < HAZARD_DIST_CM);
+	bool distanceHazardNow = (distCm > 0 && distCm < HAZARD_DIST_CM);
+	bool hazardNow = distanceHazardNow || (s == HAZARD) || hazardStopActive || motionHazardActive;
 	if (hazardNow) {
 		lcd.setRGB(255, 0, 0);
 		return;
