@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+motor_test_compile.log
+sensors.ino.bak
