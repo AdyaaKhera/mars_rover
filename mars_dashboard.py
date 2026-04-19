@@ -204,6 +204,13 @@ class MarsDashboard:
         self.gamepad_last_speed = None
         self.last_gamepad_scan = 0.0
         self.gamepad_status_var = tk.StringVar(value="Gamepad: disabled")
+        # Motor button references for gamepad visual feedback
+        self.motor_btn_fwd = None
+        self.motor_btn_back = None
+        self.motor_btn_left = None
+        self.motor_btn_right = None
+        self.motor_btn_stop = None
+        self.gamepad_last_stop_send_ms = 0
         self.last_val_log_ms = 0
         self.last_pkt_apply_ms = 0
         self.last_val_apply_ms = 0
@@ -384,18 +391,22 @@ class MarsDashboard:
         dir_frame.pack(fill="x", pady=(0, 6))
         
         # Forward button (top center)
-        fwd_btn = ttk.Button(dir_frame, text="↑ FWD", command=lambda: self.send_motor_cmd('F'), style="Mission.TButton")
-        fwd_btn.pack(side="top", fill="x", pady=(0, 2))
+        self.motor_btn_fwd = ttk.Button(dir_frame, text="↑ FWD", command=lambda: self.send_motor_cmd('F'), style="Mission.TButton")
+        self.motor_btn_fwd.pack(side="top", fill="x", pady=(0, 2))
         
         # Left, Stop, Right (middle row)
         mid_frame = tk.Frame(dir_frame, bg=BG_PANEL)
         mid_frame.pack(fill="x", pady=(0, 2))
-        ttk.Button(mid_frame, text="← LEFT", command=lambda: self.send_motor_cmd('L'), style="Mission.TButton").pack(side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(mid_frame, text="STOP", command=lambda: self.send_motor_cmd('S'), style="Mission.TButton").pack(side="left", fill="x", expand=True, padx=2)
-        ttk.Button(mid_frame, text="RIGHT →", command=lambda: self.send_motor_cmd('R'), style="Mission.TButton").pack(side="left", fill="x", expand=True, padx=(2, 0))
+        self.motor_btn_left = ttk.Button(mid_frame, text="← LEFT", command=lambda: self.send_motor_cmd('L'), style="Mission.TButton")
+        self.motor_btn_left.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self.motor_btn_stop = ttk.Button(mid_frame, text="STOP", command=lambda: self.send_motor_cmd('S'), style="Mission.TButton")
+        self.motor_btn_stop.pack(side="left", fill="x", expand=True, padx=2)
+        self.motor_btn_right = ttk.Button(mid_frame, text="RIGHT →", command=lambda: self.send_motor_cmd('R'), style="Mission.TButton")
+        self.motor_btn_right.pack(side="left", fill="x", expand=True, padx=(2, 0))
         
         # Backward button (bottom center)
-        ttk.Button(dir_frame, text="↓ BACK", command=lambda: self.send_motor_cmd('B'), style="Mission.TButton").pack(side="bottom", fill="x", pady=(2, 0))
+        self.motor_btn_back = ttk.Button(dir_frame, text="↓ BACK", command=lambda: self.send_motor_cmd('B'), style="Mission.TButton")
+        self.motor_btn_back.pack(side="bottom", fill="x", pady=(2, 0))
         
         # Speed control
         speed_frame = tk.Frame(motor_card, bg=BG_PANEL)
@@ -533,10 +544,7 @@ class MarsDashboard:
             return
         
         try:
-            # Send direction command
-            self.serial_conn.write(cmd.encode())
-            
-            # Send speed command (0-9 or q for 100%).
+            # Send framed command packet to avoid accidental moves from loose bytes.
             speed_level = int(self.motor_speed_var.get())
             if speed_level >= 10:
                 speed_cmd = "q"
@@ -544,7 +552,7 @@ class MarsDashboard:
             else:
                 speed_cmd = str(max(0, min(9, speed_level)))
                 pct = int(speed_cmd) * 10
-            self.serial_conn.write(speed_cmd.encode())
+            self.serial_conn.write(f"!{cmd}{speed_cmd}\n".encode())
 
             cmd_name = {"F": "FORWARD", "B": "BACKWARD", "L": "LEFT", "R": "RIGHT", "S": "STOP"}.get(cmd, cmd)
             if not quiet:
@@ -660,21 +668,42 @@ class MarsDashboard:
                 self.append_log(f"Gamepad open failed: {e}")
             return False
 
+    def update_gamepad_button_highlight(self, cmd):
+        """Update visual feedback on motor buttons based on gamepad command."""
+        btns = {'F': self.motor_btn_fwd, 'B': self.motor_btn_back, 'L': self.motor_btn_left, 'R': self.motor_btn_right, 'S': self.motor_btn_stop}
+        for c, btn in btns.items():
+            if btn is None:
+                continue
+            if c == cmd:
+                btn.state(['pressed'])
+            else:
+                btn.state(['!pressed'])
+
+    def clear_gamepad_button_highlight(self):
+        """Clear all button highlights."""
+        for btn in [self.motor_btn_fwd, self.motor_btn_back, self.motor_btn_left, self.motor_btn_right, self.motor_btn_stop]:
+            if btn is not None:
+                btn.state(['!pressed'])
+
     def poll_gamepad(self):
         if not self.gamepad_enabled:
+            self.clear_gamepad_button_highlight()
             return
 
         global pygame
         if pygame is None:
+            self.clear_gamepad_button_highlight()
             return
 
         now = time.time()
         if (self.gamepad is None or not self.gamepad.get_init()) and (now - self.last_gamepad_scan) > 1.0:
             self.last_gamepad_scan = now
             self.scan_gamepad(force_log=False)
+            self.clear_gamepad_button_highlight()
             return
 
         if self.gamepad is None:
+            self.clear_gamepad_button_highlight()
             return
 
         try:
@@ -725,14 +754,25 @@ class MarsDashboard:
                 self.update_speed_label(str(speed_level))
                 self.gamepad_last_speed = speed_level
 
+            # Send command on state change, or resend STOP periodically to ensure safety.
+            now_ms = int(time.time() * 1000)
             if desired != self.gamepad_last_cmd:
                 self.gamepad_last_cmd = desired
                 self.send_motor_cmd(desired, quiet=True, source="GP")
+                self.gamepad_last_stop_send_ms = now_ms
                 cmd_name = {"F": "FORWARD", "B": "BACKWARD", "L": "LEFT", "R": "RIGHT", "S": "STOP"}.get(desired, desired)
                 self.append_log(f"[GP] {cmd_name} @ {min(100, speed_level * 10)}%")
+            elif desired == 'S' and (now_ms - self.gamepad_last_stop_send_ms) > 200:
+                # Resend STOP every 200ms when idle to ensure rover doesn't drift.
+                self.send_motor_cmd('S', quiet=True, source="GP")
+                self.gamepad_last_stop_send_ms = now_ms
+            
+            # Update button highlights to show gamepad is active.
+            self.update_gamepad_button_highlight(desired)
         except Exception as e:
             self.gamepad_status_var.set("Gamepad: read error")
             self.append_log(f"Gamepad read error: {e}")
+            self.clear_gamepad_button_highlight()
             self.gamepad = None
 
     def run_motor_diagnostics(self):

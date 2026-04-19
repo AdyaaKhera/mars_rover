@@ -147,6 +147,7 @@ const unsigned long CAL_TIME_MS = 5000;
 const unsigned long LOOP_MS = 50;
 const unsigned long COMMAND_PUMP_MS = 1;
 const unsigned long SUMMARY_MS = 30000;
+const unsigned long CMD_WATCHDOG_MS = 900;
 
 // Distance smoothing
 float dBuf[5] = {0, 0, 0, 0, 0};
@@ -196,6 +197,9 @@ char requestedCmd = 'S';
 char effectiveCmd = 'S';
 bool hazardStopActive = false;
 int motorPwm = 170;
+char pendingMotorCmd = 0;
+unsigned long pendingMotorCmdMs = 0;
+unsigned long lastValidMotorCmdMs = 0;
 
 // Motion hazard tracking from dashboard
 float motionScore = 0.0;
@@ -486,8 +490,46 @@ void applyDriveCommand(char cmd) {
 }
 
 void serviceSerialCommands() {
+	if (pendingMotorCmd != 0 && (millis() - pendingMotorCmdMs) > 160) {
+		pendingMotorCmd = 0;
+	}
+
 	while (Serial.available() > 0) {
 		char c = Serial.peek();
+
+		// Framed drive command from dashboard: !<cmd><speed>\n
+		// cmd: F/B/L/R/S, speed: 0-9 or q(=100%).
+		if (c == '!') {
+			String line = "";
+			while (Serial.available() > 0) {
+				char ch = Serial.read();
+				line += ch;
+				if (ch == '\n') break;
+			}
+
+			if (line.length() >= 4) {
+				char m = line.charAt(1);
+				char s = line.charAt(2);
+				bool validCmd = (m == 'F' || m == 'B' || m == 'L' || m == 'R' || m == 'S');
+				bool validSpeed = ((s >= '0' && s <= '9') || s == 'q' || s == 'Q');
+				if (validCmd && validSpeed) {
+					if (s == 'q' || s == 'Q') {
+						motorPwm = 255;
+					} else {
+						int pct = (s - '0') * 10;
+						motorPwm = map(pct, 0, 90, 0, 255);
+					}
+					requestedCmd = m;
+					pendingMotorCmd = 0;
+					lastValidMotorCmdMs = millis();
+					Serial.print("MARS_CMD|motor=");
+					Serial.print(m);
+					Serial.print("|pwm=");
+					Serial.println(motorPwm);
+				}
+			}
+			continue;
+		}
 		
 		// Check if this is the start of a MARS_MOTION packet; if so, consume it
 		if (c == 'M') {
@@ -510,32 +552,8 @@ void serviceSerialCommands() {
 			continue;
 		}
 		
-		// Otherwise, consume the character and process as motor command
+		// Otherwise, consume and ignore loose bytes to avoid random motion from noise.
 		c = Serial.read();
-
-		if (c == 'F' || c == 'B' || c == 'L' || c == 'R' || c == 'S') {
-			requestedCmd = c;
-			Serial.print("MARS_CMD|motor=");
-			Serial.print(c);
-			Serial.print("|pwm=");
-			Serial.println(motorPwm);
-			continue;
-		}
-
-		if (c >= '0' && c <= '9') {
-			int pct = (c - '0') * 10;
-			motorPwm = map(pct, 0, 90, 0, 255);
-			Serial.print("MARS_SPEED|pct=");
-			Serial.print(pct);
-			Serial.print("|pwm=");
-			Serial.println(motorPwm);
-			continue;
-		}
-
-		if (c == 'q' || c == 'Q') {
-			motorPwm = 255;
-			Serial.println("MARS_SPEED|pct=100|pwm=255");
-		}
 	}
 }
 
@@ -647,6 +665,15 @@ void parseMotionScore(const String &line) {
 	}
 }
 void updateMotionSafety(float distCm) {
+	if ((millis() - lastValidMotorCmdMs) > CMD_WATCHDOG_MS) {
+		if (requestedCmd != 'S' || effectiveCmd != 'S') {
+			requestedCmd = 'S';
+			effectiveCmd = 'S';
+			applyDriveCommand('S');
+		}
+		return;
+	}
+
 	bool distanceHazardNow = (distCm > 0 && distCm < HAZARD_DIST_CM);
 	hazardStopActive = distanceHazardNow;
 
@@ -855,6 +882,7 @@ void updateLcd(float distCm, float tempC, uint8_t s) {
 
 void setup() {
 	Serial.begin(115200);
+	lastValidMotorCmdMs = millis();
 	delay(150);
 	Serial.println("MARS_ROVER_BOOT");
 	Serial.print("MARS_CFG|ultraMode=");
