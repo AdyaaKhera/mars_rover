@@ -651,10 +651,15 @@ void updateMotionSafety(float distCm) {
 	hazardStopActive = distanceHazardNow;
 
 	if (distanceHazardNow) {
-		// Hard safety override: hazardous distance always stops the rover.
-		effectiveCmd = 'S';
-		requestedCmd = 'S';
-		applyDriveCommand('S');
+		if (requestedCmd == 'B') {
+			effectiveCmd = 'B';
+			applyDriveCommand('B');
+		} else {
+			// Hard safety override: hazardous distance stops non-reverse motion.
+			effectiveCmd = 'S';
+			requestedCmd = 'S';
+			applyDriveCommand('S');
+		}
 		return;
 	}
 
