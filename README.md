@@ -1,10 +1,10 @@
 # NEXUS
 
-Next-gen Expendable Unmanned System for exploratory missions.
+Next-gen EXpendable Unmanned System (NEXUS) for exploratory missions.
 
-NEXUS is a modular Mars rover cobot platform built for unknown and hazardous environments. It combines Arduino firmware, a real-time Python mission dashboard, multi-sensor telemetry, and safety-first drive control.
+------------------
 
-## Pitch
+## Introduction
 
 NEXUS is an expendable exploration cobot designed for rapid iteration. It delivers real-time telemetry, low-delay control, and layered safety systems so teams can explore, test, and evolve quickly in uncertain terrain.
 
@@ -38,7 +38,7 @@ NEXUS is an expendable exploration cobot designed for rapid iteration. It delive
 - Serial communications: pyserial
 - Camera and CV: OpenCV
 - Gamepad input: pygame
-- Embedded platform: Arduino-compatible board
+- Embedded platform: Arduino R4 WiFi and shield
 - Motor drivers: L298N-compatible dual H-bridge setup
 - Sensors: ultrasonic distance, thermistor temperature, LDR light, optional moisture, optional BMP280 barometer
 
@@ -86,15 +86,8 @@ NEXUS uses layered motor safety:
 
 Dashboard to firmware packet format:
 
-!<cmd><speed>\n
 - cmd: F, B, L, R, S
 - speed: 0-9 (0 to 90 percent), q (100 percent)
-
-Examples:
-
-- !F8
-- !S0
-- !Rq
 
 Notes:
 
@@ -207,10 +200,6 @@ Unexpected stop behavior:
 - Check command stream continuity from dashboard
 - Remember watchdog will force stop if no valid command for 900 ms
 
-## Why NEXUS
+## Why NEXUS?
 
 NEXUS is designed for exploratory missions where resilience, iteration speed, and safety matter more than preserving a single unit. It is expendable by design, modular by architecture, and open-source for rapid team innovation.
-
-## License
-
-Choose and add your preferred open-source license for distribution.
