@@ -8,6 +8,8 @@ Next-gen EXpendable Unmanned System (NEXUS) for exploratory missions.
 
 NEXUS is an expendable exploration cobot designed for rapid iteration. It delivers real-time telemetry, low-delay control, and layered safety systems so teams can explore, test, and evolve quickly in uncertain terrain.
 
+[![NEXUS DEMO VIDEO](https://img.youtube.com/vi/dUW_bmgcr4A/0.jpg)](https://www.youtube.com/watch?v=dUW_bmgcr4A)
+
 ## What This Project Does
 
 - Streams live rover telemetry to a desktop dashboard
